@@ -12,7 +12,7 @@ set "REPO=%REPO:~0,-1%"
 :: ── Uninstall path ─────────────────────────────────────────────────────────
 if /i "%~1"=="--uninstall" (
     echo Removing codesearch MCP server ...
-    claude mcp remove --scope user codesearch
+    claude mcp remove --scope user tscodesearch
     if errorlevel 1 (
         echo WARNING: claude mcp remove failed ^(server may not have been registered^).
     ) else (
@@ -34,8 +34,8 @@ if errorlevel 1 (
 
 echo.
 echo [2/2] Registering MCP server with Claude Code ...
-claude mcp remove --scope user codesearch >nul 2>&1
-claude mcp add --scope user codesearch -- wsl bash "%WSL_REPO%/mcp.sh"
+claude mcp remove --scope user tscodesearch >nul 2>&1
+claude mcp add --scope user tscodesearch -- wsl bash "%WSL_REPO%/mcp.sh"
 if errorlevel 1 (
     echo ERROR: Failed to register MCP server.
     exit /b 1

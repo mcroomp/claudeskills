@@ -83,7 +83,7 @@ def _ts_search_then_filter(glob_pattern: str, ts_query: str,
 
 # ── MCP server ────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("codesearch")
+mcp = FastMCP("tscodesearch")
 
 
 @mcp.tool()
