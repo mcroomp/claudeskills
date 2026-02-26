@@ -1,0 +1,6 @@
+# Shell scripts must have Unix line endings — they run in WSL
+*.sh text eol=lf
+
+# Windows batch files use CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
