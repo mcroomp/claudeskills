@@ -30,6 +30,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Make scripts executable
+        run: chmod +x d3figurer/server.sh d3figurer/mcp.sh d3figurer/setup_mcp.sh d3figurer/test.sh
+
       - name: Install d3figurer dependencies
         run: d3figurer/server.sh install
 
