@@ -7,12 +7,30 @@ Usage:
     python start_server.py [--stop] [--log]
 """
 
+
+def _require_wsl_venv():
+    import sys, os
+    if sys.platform != "linux":
+        sys.exit("ERROR: must run under WSL, not Windows Python.")
+    try:
+        if "microsoft" not in open("/proc/version").read().lower():
+            sys.exit("ERROR: must run under WSL (Microsoft kernel).")
+    except OSError:
+        sys.exit("ERROR: cannot read /proc/version.")
+    if sys.prefix == sys.base_prefix:
+        sys.exit("ERROR: must run inside a virtualenv (activate ~/.local/mcp-venv).")
+_require_wsl_venv()
+del _require_wsl_venv
+
+
 import os
 import sys
 import time
 import subprocess
 import argparse
 import urllib.request
+
+import pwd as _pwd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from codesearch.config import API_KEY, PORT, TYPESENSE_VERSION
@@ -23,19 +41,22 @@ TAR_URL = (
 )
 
 # Everything lives in WSL home - no /mnt/ cross-filesystem overhead
-WSL_HOME_BIN   = "~/.local/typesense/typesense-server"
-WSL_HOME_DATA  = "~/.local/typesense/data"
-WSL_LOG        = "/tmp/typesense.log"
+_HOME          = _pwd.getpwuid(os.getuid()).pw_dir
+_RUN_DIR       = os.path.join(_HOME, ".local", "typesense")
+os.makedirs(_RUN_DIR, exist_ok=True)
 
-PID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "typesense.pid")
+WSL_HOME_BIN   = os.path.join(_RUN_DIR, "typesense-server")
+WSL_HOME_DATA  = os.path.join(_RUN_DIR, "data")
+WSL_LOG        = os.path.join(_RUN_DIR, "typesense.log")
+PID_FILE       = os.path.join(_RUN_DIR, "typesense.pid")
 
 
-def wsl(cmd, **kwargs):
-    return subprocess.run(["wsl", "bash", "-c", cmd], **kwargs)
+def _sh(cmd, **kwargs):
+    return subprocess.run(["bash", "-c", cmd], **kwargs)
 
 
-def wsl_out(cmd) -> str:
-    r = wsl(cmd, capture_output=True, text=True)
+def _sh_out(cmd) -> str:
+    r = _sh(cmd, capture_output=True, text=True)
     return r.stdout.strip()
 
 
@@ -43,7 +64,7 @@ def is_running() -> bool:
     if not os.path.exists(PID_FILE):
         return False
     pid = open(PID_FILE).read().strip()
-    alive = wsl_out(f"kill -0 {pid} 2>/dev/null && echo yes || echo no")
+    alive = _sh_out(f"kill -0 {pid} 2>/dev/null && echo yes || echo no")
     return alive == "yes"
 
 
@@ -64,13 +85,13 @@ def wait_for_ready(timeout=40) -> bool:
 
 
 def ensure_binary():
-    exists = wsl_out(f"test -x {WSL_HOME_BIN} && echo ok || echo missing")
+    exists = _sh_out(f"test -x {WSL_HOME_BIN} && echo ok || echo missing")
     if exists == "ok":
         return
     print(f"Downloading Typesense {TYPESENSE_VERSION} to WSL home (~/.local/typesense/)...")
     # Download directly to WSL home - no /mnt/ path involved
-    wsl(f"mkdir -p ~/.local/typesense", check=True)
-    result = wsl(
+    _sh(f"mkdir -p ~/.local/typesense", check=True)
+    result = _sh(
         f"curl -L --progress-bar '{TAR_URL}' | tar -xz -C ~/.local/typesense/",
         check=False
     )
@@ -78,17 +99,17 @@ def ensure_binary():
         print("ERROR: Failed to download/extract Typesense binary")
         sys.exit(1)
     # Find wherever the binary landed and chmod it
-    actual = wsl_out(
+    actual = _sh_out(
         "find ~/.local/typesense -name 'typesense-server' -type f 2>/dev/null | head -1"
     )
     if not actual:
         print("ERROR: typesense-server binary not found after extraction")
         sys.exit(1)
     # Move to canonical location only if it's in a subdir
-    canonical = wsl_out("echo ~/.local/typesense/typesense-server")
+    canonical = _sh_out("echo ~/.local/typesense/typesense-server")
     if actual != canonical:
-        wsl(f"mv '{actual}' '{canonical}'", check=True)
-    wsl(f"chmod +x '{canonical}'", check=True)
+        _sh(f"mv '{actual}' '{canonical}'", check=True)
+    _sh(f"chmod +x '{canonical}'", check=True)
     print("Binary ready.")
 
 
@@ -98,24 +119,20 @@ def start():
         return
 
     ensure_binary()
-    # Resolve ~ to absolute path so it works in exec args
-    wsl_home = wsl_out("echo $HOME")
-    bin_abs  = f"{wsl_home}/.local/typesense/typesense-server"
-    data_abs = f"{wsl_home}/.local/typesense/data"
-    wsl(f"mkdir -p '{data_abs}'", check=True)
+    os.makedirs(WSL_HOME_DATA, exist_ok=True)
 
     launch = (
-        f"setsid '{bin_abs}' "
-        f"--data-dir='{data_abs}' "
+        f"setsid '{WSL_HOME_BIN}' "
+        f"--data-dir='{WSL_HOME_DATA}' "
         f"--api-key={API_KEY} "
         f"--port={PORT} "
         f"--enable-cors "
         f">{WSL_LOG} 2>&1 & sleep 0.5; pgrep -f 'typesense-server' | head -1"
     )
-    pid = wsl_out(launch)
+    pid = _sh_out(launch)
     if not pid.isdigit():
         print(f"ERROR: Could not get PID. Output: '{pid}'")
-        print(f"Check log: wsl bash -c 'cat {WSL_LOG}'")
+        print(f"Check log: cat {WSL_LOG}")
         sys.exit(1)
 
     open(PID_FILE, "w").write(pid)
@@ -125,22 +142,22 @@ def start():
         print(f"Ready at http://localhost:{PORT}")
     else:
         print(f"\nWARNING: did not respond in 40s. Check log with:")
-        print(f"  wsl bash -c 'cat {WSL_LOG}'")
+        print(f"  cat {WSL_LOG}")
 
 
 def stop():
     if not os.path.exists(PID_FILE):
-        wsl("pkill -f typesense-server 2>/dev/null || true")
+        _sh("pkill -f typesense-server 2>/dev/null || true")
         print("Sent kill signal (no PID file found).")
         return
     pid = open(PID_FILE).read().strip()
-    wsl(f"kill {pid} 2>/dev/null || true")
+    _sh(f"kill {pid} 2>/dev/null || true")
     os.remove(PID_FILE)
     print(f"Typesense (pid={pid}) stopped.")
 
 
 def show_log():
-    wsl(f"cat {WSL_LOG}")
+    _sh(f"cat {WSL_LOG}")
 
 
 if __name__ == "__main__":

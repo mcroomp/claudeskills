@@ -11,6 +11,22 @@ Usage (normally started by `ts start` or `ts heartbeat`):
 
 from __future__ import annotations
 
+
+def _require_wsl_venv():
+    import sys, os
+    if sys.platform != "linux":
+        sys.exit("ERROR: must run under WSL, not Windows Python.")
+    try:
+        if "microsoft" not in open("/proc/version").read().lower():
+            sys.exit("ERROR: must run under WSL (Microsoft kernel).")
+    except OSError:
+        sys.exit("ERROR: cannot read /proc/version.")
+    if sys.prefix == sys.base_prefix:
+        sys.exit("ERROR: must run inside a virtualenv (activate ~/.local/mcp-venv).")
+_require_wsl_venv()
+del _require_wsl_venv
+
+
 import os
 import sys
 import time
@@ -22,16 +38,23 @@ import urllib.request
 _util_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _util_dir)
 
-from codesearch.config import API_KEY, PORT, HOST  # noqa: E402
+from codesearch.config import API_KEY, PORT, HOST, COLLECTION  # noqa: E402
+
+import pwd as _pwd
+_HOME          = _pwd.getpwuid(os.getuid()).pw_dir
+_RUN_DIR       = os.path.join(_HOME, ".local", "typesense")
+os.makedirs(_RUN_DIR, exist_ok=True)
 
 _THIS_DIR      = os.path.dirname(os.path.abspath(__file__))
-_VENV_PY       = os.path.join(_util_dir, ".venv", "Scripts", "python.exe")
+_VENV_PY       = os.path.join(_HOME, ".local", "mcp-venv", "bin", "python")
 _SERVER_PY     = os.path.join(_THIS_DIR, "start_server.py")
 _WATCHER_PY    = os.path.join(_THIS_DIR, "watcher.py")
-_SERVER_PID    = os.path.join(_THIS_DIR, "typesense.pid")
-_WATCHER_PID   = os.path.join(_THIS_DIR, "watcher.pid")
-_HEARTBEAT_PID = os.path.join(_THIS_DIR, "heartbeat.pid")
-HEARTBEAT_LOG  = os.path.join(_THIS_DIR, "heartbeat.log")
+_SERVER_PID    = os.path.join(_RUN_DIR, "typesense.pid")
+_WATCHER_PID   = os.path.join(_RUN_DIR, "watcher.pid")
+_HEARTBEAT_PID = os.path.join(_RUN_DIR, "heartbeat.pid")
+_INDEXER_PID   = os.path.join(_RUN_DIR, "indexer.pid")
+_INDEXER_LOG   = os.path.join(_RUN_DIR, "indexer.log")
+HEARTBEAT_LOG  = os.path.join(_RUN_DIR, "heartbeat.log")
 
 CHECK_INTERVAL = 30   # seconds between checks
 FAIL_THRESHOLD = 3    # consecutive failures before restarting the server
@@ -67,23 +90,45 @@ def _pid_alive_wsl(pid_file: str) -> bool:
     if not pid:
         return False
     r = subprocess.run(
-        ["wsl", "bash", "-c", f"kill -0 {pid} 2>/dev/null && echo yes || echo no"],
+        ["bash", "-c", f"kill -0 {pid} 2>/dev/null && echo yes || echo no"],
         capture_output=True, text=True,
     )
     return r.stdout.strip() == "yes"
 
 
-def _pid_alive_win(pid_file: str) -> bool:
-    if not os.path.exists(pid_file):
-        return False
-    pid = open(pid_file).read().strip()
-    if not pid:
-        return False
-    r = subprocess.run(
-        ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-        capture_output=True, text=True,
-    )
-    return pid in r.stdout
+
+# ── index status ───────────────────────────────────────────────────────────────
+
+def _index_status() -> str:
+    """Return a short string describing the index state, e.g. '42,301 docs' or 'no index'."""
+    url = f"http://{HOST}:{PORT}/collections/{COLLECTION}"
+    req = urllib.request.Request(url, headers={"X-TYPESENSE-API-KEY": API_KEY})
+    try:
+        with urllib.request.urlopen(req, timeout=3) as r:
+            stats = json.loads(r.read())
+        ndocs = stats.get("num_documents", 0)
+        status = f"{ndocs:,} docs"
+    except Exception:
+        return "no index"
+
+    # Check if the indexer is actively running
+    if _pid_alive_wsl(_INDEXER_PID):
+        progress = ""
+        if os.path.exists(_INDEXER_LOG):
+            try:
+                with open(_INDEXER_LOG, encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+                last = lines[-1].rstrip() if lines else ""
+                # Trim long lines so the log stays readable
+                if len(last) > 80:
+                    last = last[:77] + "..."
+                if last:
+                    progress = f" — {last}"
+            except OSError:
+                pass
+        return f"{status} [indexing{progress}]"
+
+    return status
 
 
 # ── recovery ───────────────────────────────────────────────────────────────────
@@ -122,7 +167,7 @@ def run() -> None:
     )
 
     # Ensure watcher is running immediately on startup
-    if not _pid_alive_win(_WATCHER_PID) and _health_ok():
+    if not _pid_alive_wsl(_WATCHER_PID) and _health_ok():
         _log("Watcher not running - starting it...")
         _restart_watcher()
 
@@ -135,15 +180,16 @@ def run() -> None:
             if failures > 0:
                 _log(f"Server recovered after {failures} failure(s).")
             failures = 0
+            _log(f"OK  index={_index_status()}")
         else:
             failures += 1
-            _log(f"Health check FAILED ({failures}/{FAIL_THRESHOLD})")
+            _log(f"Health check FAILED ({failures}/{FAIL_THRESHOLD})  index=?")
             if failures >= FAIL_THRESHOLD:
                 _restart_server()
                 failures = 0
 
         # ── watcher watchdog ───────────────────────────────────────────────────
-        if not _pid_alive_win(_WATCHER_PID) and _health_ok():
+        if not _pid_alive_wsl(_WATCHER_PID) and _health_ok():
             _log("Watcher is dead - reviving...")
             _restart_watcher()
 

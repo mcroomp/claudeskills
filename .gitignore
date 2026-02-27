@@ -16,6 +16,9 @@ venv/
 env/
 .env
 
+# Local configuration (written by setup_mcp.cmd)
+codesearch/config.json
+
 # Logs and runtime files
 *.log
 *.pid

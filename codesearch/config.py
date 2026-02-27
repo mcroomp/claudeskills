@@ -1,9 +1,9 @@
 """Shared configuration for Typesense search tooling."""
 
-API_KEY = "codesearch-local"
 PORT = 8108
 HOST = "localhost"
 
+import json
 import os
 import re
 import sys
@@ -42,12 +42,25 @@ def to_native_path(path: str) -> str:
             return f"/mnt/{m.group(1).lower()}{m.group(2)}"
     return path
 
+# ── config.json ───────────────────────────────────────────────────────────────
+# Stores src_root and api_key. Written by setup_mcp.cmd / setup_mcp.sh.
+# Format: {"src_root": "Q:/my/repo/src", "api_key": "codesearch-local"}
+_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+def _read_config() -> dict:
+    try:
+        with open(_CONFIG_FILE) as _f:
+            return json.load(_f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+_CONFIG = _read_config()
+
+API_KEY: str = _CONFIG.get("api_key", "codesearch-local")
+
 # ── Source root ───────────────────────────────────────────────────────────────
-# Set CODESEARCH_SRC_ROOT to the Windows-style path of the source tree to index
-# (e.g. "Q:\my\repo\src" or "Q:/my/repo/src").  Both slash styles are accepted.
-_env_src = os.environ.get("CODESEARCH_SRC_ROOT", "")
 # Windows-style forward-slash path (what Typesense stores)
-SRC_ROOT_WIN = _env_src.replace("\\", "/").rstrip("/")
+SRC_ROOT_WIN = _CONFIG.get("src_root", "").replace("\\", "/").rstrip("/")
 # Platform-native path (for file I/O)
 SRC_ROOT = to_native_path(SRC_ROOT_WIN) if SRC_ROOT_WIN else ""
 

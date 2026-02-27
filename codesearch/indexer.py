@@ -6,6 +6,22 @@ Usage:
     python indexer.py [--reset]   # --reset drops and recreates the collection
 """
 
+
+def _require_wsl_venv():
+    import sys, os
+    if sys.platform != "linux":
+        sys.exit("ERROR: must run under WSL, not Windows Python.")
+    try:
+        if "microsoft" not in open("/proc/version").read().lower():
+            sys.exit("ERROR: must run under WSL (Microsoft kernel).")
+    except OSError:
+        sys.exit("ERROR: cannot read /proc/version.")
+    if sys.prefix == sys.base_prefix:
+        sys.exit("ERROR: must run inside a virtualenv (activate ~/.local/mcp-venv).")
+_require_wsl_venv()
+del _require_wsl_venv
+
+
 import os
 import sys
 import time

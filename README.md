@@ -24,14 +24,10 @@ Project-level instructions for Claude Code — service management commands, arch
 ## Quick start
 
 ```bat
-rem 1. Create service wrapper (once)
-echo @echo off > ts.cmd
-echo .venv\Scripts\python.exe codesearch\service.py %%* >> ts.cmd
-
-rem 2. Register MCP server with Claude Code (once)
+rem 1. Create WSL venv, generate ts.cmd, and register MCP server (once)
 codesearch\setup_mcp.cmd
 
-rem 3. Start service and build initial index
+rem 2. Start service and build initial index
 ts start
 ts index --reset
 ```
@@ -45,5 +41,5 @@ MCP server · Claude Code tools · code search · Typesense · tree-sitter · C#
 ## Requirements
 
 - Windows 11 with WSL2
-- Python 3.10+ virtualenv at `.venv\` (Windows) and `~/.local/mcp-venv/` (WSL)
+- WSL Python 3.10+ virtualenv at `~/.local/mcp-venv/` — created automatically by `setup_mcp.cmd`
 - Typesense binary — auto-downloaded to `~/.local/typesense/` on first `ts start`

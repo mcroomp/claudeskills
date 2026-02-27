@@ -8,7 +8,7 @@ A code search tool for a large source tree (98K+ files: C#, C++, Python, etc.). 
 
 ## Service management
 
-The main CLI entry point is `ts.cmd` (a wrapper around `service.py`):
+The main CLI entry point is `ts.sh` (a wrapper around `service.py`):
 
 ```
 ts status                    # show server, watcher, heartbeat, indexer state
@@ -22,13 +22,7 @@ ts log --indexer [-n 40]     # tail indexer log
 ts log --heartbeat
 ```
 
-These commands expect a virtualenv at `.venv\Scripts\python.exe` (relative to the repo root).
-
-`ts.cmd` is a local wrapper script (not checked in) that invokes `service.py`. Create it as:
-```bat
-@echo off
-.venv\Scripts\python.exe codesearch\service.py %*
-```
+`ts.sh` is checked in at `codesearch/ts.sh` and invokes `service.py` via WSL's mcp-venv Python.
 
 ## Running tests
 

@@ -17,6 +17,22 @@ Usage:
 
 from __future__ import annotations
 
+
+def _require_wsl_venv():
+    import sys, os
+    if sys.platform != "linux":
+        sys.exit("ERROR: must run under WSL, not Windows Python.")
+    try:
+        if "microsoft" not in open("/proc/version").read().lower():
+            sys.exit("ERROR: must run under WSL (Microsoft kernel).")
+    except OSError:
+        sys.exit("ERROR: cannot read /proc/version.")
+    if sys.prefix == sys.base_prefix:
+        sys.exit("ERROR: must run inside a virtualenv (activate ~/.local/mcp-venv).")
+_require_wsl_venv()
+del _require_wsl_venv
+
+
 import os
 import sys
 import subprocess
@@ -31,52 +47,38 @@ sys.path.insert(0, _util_dir)
 from codesearch.config import API_KEY, PORT, HOST, COLLECTION, TYPESENSE_VERSION
 
 # ── paths ──────────────────────────────────────────────────────────────────────
+import pwd as _pwd
+_HOME       = _pwd.getpwuid(os.getuid()).pw_dir          # WSL home, never Windows
+_RUN_DIR    = os.path.join(_HOME, ".local", "typesense") # logs + PIDs live here
+os.makedirs(_RUN_DIR, exist_ok=True)
+
 _THIS_DIR   = os.path.dirname(os.path.abspath(__file__))
-_VENV_PY    = os.path.join(_util_dir, ".venv", "Scripts", "python.exe")
+_VENV_PY    = os.path.join(_HOME, ".local", "mcp-venv", "bin", "python")
 _SERVER_PY  = os.path.join(_THIS_DIR, "start_server.py")
 _INDEXER_PY = os.path.join(_THIS_DIR, "indexer.py")
 _WATCHER_PY = os.path.join(_THIS_DIR, "watcher.py")
-_INDEXER_LOG   = os.path.join(_THIS_DIR, "indexer.log")
-_SERVER_PID    = os.path.join(_THIS_DIR, "typesense.pid")
-_WATCHER_PID   = os.path.join(_THIS_DIR, "watcher.pid")
-_INDEXER_PID   = os.path.join(_THIS_DIR, "indexer.pid")
-_HEARTBEAT_PID = os.path.join(_THIS_DIR, "heartbeat.pid")
-_HEARTBEAT_LOG = os.path.join(_THIS_DIR, "heartbeat.log")
+_INDEXER_LOG   = os.path.join(_RUN_DIR, "indexer.log")
+_SERVER_PID    = os.path.join(_RUN_DIR, "typesense.pid")
+_WATCHER_PID   = os.path.join(_RUN_DIR, "watcher.pid")
+_INDEXER_PID   = os.path.join(_RUN_DIR, "indexer.pid")
+_HEARTBEAT_PID = os.path.join(_RUN_DIR, "heartbeat.pid")
+_HEARTBEAT_LOG = os.path.join(_RUN_DIR, "heartbeat.log")
 _HEARTBEAT_PY  = os.path.join(_THIS_DIR, "heartbeat.py")
-_WSL_LOG       = "/tmp/typesense.log"
+_WSL_LOG       = os.path.join(_RUN_DIR, "typesense.log")
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
-def _wsl_out(cmd: str) -> str:
-    r = subprocess.run(["wsl", "bash", "-c", cmd], capture_output=True, text=True)
-    return r.stdout.strip()
-
-
-def _pid_alive_win(pid_file: str) -> tuple[bool, str]:
-    """Return (alive, pid_str) for a Windows-spawned process tracked by pid_file."""
-    if not os.path.exists(pid_file):
-        return False, ""
-    pid = open(pid_file).read().strip()
-    if not pid:
-        return False, ""
-    r = subprocess.run(
-        ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-        capture_output=True, text=True,
-    )
-    alive = pid in r.stdout
-    return alive, pid
-
-
 def _pid_alive_wsl(pid_file: str) -> tuple[bool, str]:
-    """Return (alive, pid_str) for a WSL process tracked by pid_file."""
+    """Return (alive, pid_str) for a process tracked by pid_file."""
     if not os.path.exists(pid_file):
         return False, ""
     pid = open(pid_file).read().strip()
     if not pid:
         return False, ""
-    result = _wsl_out(f"kill -0 {pid} 2>/dev/null && echo yes || echo no")
-    return result == "yes", pid
+    r = subprocess.run(["bash", "-c", f"kill -0 {pid} 2>/dev/null && echo yes || echo no"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() == "yes", pid
 
 
 def _typesense_health() -> dict:
@@ -101,10 +103,10 @@ def _collection_stats() -> dict | None:
         return None
 
 
-def _kill_win_pid(pid_file: str, label: str) -> None:
-    alive, pid = _pid_alive_win(pid_file)
+def _kill_pid(pid_file: str, label: str) -> None:
+    alive, pid = _pid_alive_wsl(pid_file)
     if alive:
-        subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
+        subprocess.run(["bash", "-c", f"kill {pid} 2>/dev/null || true"], capture_output=True)
         print(f"  Stopped {label} (PID {pid})")
     else:
         print(f"  {label}: not running")
@@ -140,14 +142,14 @@ def cmd_status(args) -> None:
         print(f"  Index   : (server unavailable)")
 
     # Watcher (Windows process)
-    watcher_alive, watcher_pid = _pid_alive_win(_WATCHER_PID)
+    watcher_alive, watcher_pid = _pid_alive_wsl(_WATCHER_PID)
     if watcher_alive:
         print(f"  Watcher : [OK]  running  (PID {watcher_pid})")
     else:
         print(f"  Watcher : [--] not running")
 
     # Heartbeat (Windows process)
-    hb_alive, hb_pid = _pid_alive_win(_HEARTBEAT_PID)
+    hb_alive, hb_pid = _pid_alive_wsl(_HEARTBEAT_PID)
     if hb_alive:
         last_hb = ""
         if os.path.exists(_HEARTBEAT_LOG):
@@ -159,7 +161,7 @@ def cmd_status(args) -> None:
         print(f"  Heartbt : [--] not running")
 
     # Indexer (Windows process)
-    indexer_alive, indexer_pid = _pid_alive_win(_INDEXER_PID)
+    indexer_alive, indexer_pid = _pid_alive_wsl(_INDEXER_PID)
     if indexer_alive:
         # Show tail of indexer log
         tail = ""
@@ -198,7 +200,7 @@ def cmd_start(args) -> None:
         print("Server already running.")
 
     # Start watcher
-    watcher_alive, _ = _pid_alive_win(_WATCHER_PID)
+    watcher_alive, _ = _pid_alive_wsl(_WATCHER_PID)
     if not watcher_alive:
         print("Starting file watcher...")
         p = subprocess.Popen(
@@ -213,7 +215,7 @@ def cmd_start(args) -> None:
         print("Watcher already running.")
 
     # Start heartbeat
-    hb_alive, _ = _pid_alive_win(_HEARTBEAT_PID)
+    hb_alive, _ = _pid_alive_wsl(_HEARTBEAT_PID)
     if not hb_alive:
         print("Starting heartbeat watchdog...")
         p = subprocess.Popen(
@@ -227,6 +229,17 @@ def cmd_start(args) -> None:
     else:
         print("Heartbeat already running.")
 
+    # Auto-index if collection is missing
+    if _collection_stats() is None:
+        print(f"Collection '{COLLECTION}' not found — starting indexer automatically...")
+        indexer_alive, _ = _pid_alive_wsl(_INDEXER_PID)
+        if not indexer_alive:
+            import types as _types
+            _idx_args = _types.SimpleNamespace(reset=True)
+            cmd_index(_idx_args)
+        else:
+            print("  (indexer already running)")
+
     cmd_status(args)
 
 
@@ -234,18 +247,18 @@ def cmd_stop(args) -> None:
     print("Stopping services...")
 
     # Stop indexer first
-    indexer_alive, indexer_pid = _pid_alive_win(_INDEXER_PID)
+    indexer_alive, indexer_pid = _pid_alive_wsl(_INDEXER_PID)
     if indexer_alive:
-        subprocess.run(["taskkill", "/F", "/PID", indexer_pid], capture_output=True)
+        subprocess.run(["bash", "-c", f"kill {indexer_pid} 2>/dev/null || true"], capture_output=True)
         print(f"  Stopped indexer (PID {indexer_pid})")
     if os.path.exists(_INDEXER_PID):
         os.remove(_INDEXER_PID)
 
     # Stop heartbeat
-    _kill_win_pid(_HEARTBEAT_PID, "heartbeat")
+    _kill_pid(_HEARTBEAT_PID, "heartbeat")
 
     # Stop watcher
-    _kill_win_pid(_WATCHER_PID, "watcher")
+    _kill_pid(_WATCHER_PID, "watcher")
 
     # Stop server (via start_server.py --stop)
     print("  Stopping Typesense server...")
@@ -261,7 +274,7 @@ def cmd_restart(args) -> None:
 
 
 def cmd_index(args) -> None:
-    indexer_alive, indexer_pid = _pid_alive_win(_INDEXER_PID)
+    indexer_alive, indexer_pid = _pid_alive_wsl(_INDEXER_PID)
     if indexer_alive:
         print(f"Indexer already running (PID {indexer_pid}). Stop it first with: ts stop")
         sys.exit(1)
@@ -276,7 +289,7 @@ def cmd_index(args) -> None:
 
     with open(_INDEXER_LOG, "w", encoding="utf-8") as log:
         p = subprocess.Popen(
-            [_VENV_PY, _INDEXER_PY] + flags,
+            [_VENV_PY, "-u", _INDEXER_PY] + flags,
             stdout=log,
             stderr=log,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
@@ -309,11 +322,11 @@ def cmd_log(args) -> None:
     else:
         # Server log (WSL)
         n = args.lines or 40
-        subprocess.run(["wsl", "bash", "-c", f"tail -{n} {_WSL_LOG}"])
+        subprocess.run(["bash", "-c", f"tail -{n} {_WSL_LOG}"])
 
 
 def cmd_heartbeat(args) -> None:
-    hb_alive, pid = _pid_alive_win(_HEARTBEAT_PID)
+    hb_alive, pid = _pid_alive_wsl(_HEARTBEAT_PID)
     if hb_alive:
         print(f"Heartbeat already running (PID {pid})")
         return
@@ -333,7 +346,7 @@ def cmd_heartbeat(args) -> None:
 
 
 def cmd_watcher(args) -> None:
-    watcher_alive, pid = _pid_alive_win(_WATCHER_PID)
+    watcher_alive, pid = _pid_alive_wsl(_WATCHER_PID)
     if watcher_alive:
         print(f"Watcher already running (PID {pid})")
         return
