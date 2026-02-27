@@ -28,7 +28,7 @@ const path = require('path');
  */
 function formatReport(result, figure, opts = {}) {
   const { textCount, checkedCount, overlaps = [], tooClose = [],
-          clipped = [], boxOverflows = [], svgW, svgH } = result;
+          clipped = [], boxOverflows = [], rectIntrusions = [], svgW, svgH } = result;
   const { runNum = 0, elapsedMs = 0, watchMode = false, screenshotPath = null } = opts;
 
   const lines = [];
@@ -41,7 +41,7 @@ function formatReport(result, figure, opts = {}) {
   lines.push(`  ${textCount} text elements inspected${skipNote}`);
 
   const allClear = overlaps.length === 0 && tooClose.length === 0
-    && clipped.length === 0 && boxOverflows.length === 0;
+    && clipped.length === 0 && boxOverflows.length === 0 && rectIntrusions.length === 0;
   if (allClear) lines.push('  OK — no overlaps, no clipping, no box overflows');
 
   if (overlaps.length > 0) {
@@ -72,6 +72,14 @@ function formatReport(result, figure, opts = {}) {
     const sorted = [...boxOverflows].sort((a, b) => b.overflowPx - a.overflowPx);
     for (const o of sorted) {
       lines.push(`    ${o.edge} +${o.overflowPx}px  "${o.text}" @ (${o.textPos[0]},${o.textPos[1]})`);
+    }
+  }
+
+  if (rectIntrusions.length > 0) {
+    lines.push(`\n  RECT INTRUSIONS (${rectIntrusions.length}) — text outside a rect but bounding box overlaps it:`);
+    const sorted = [...rectIntrusions].sort((a, b) => (b.overlapX * b.overlapY) - (a.overlapX * a.overlapY));
+    for (const o of sorted) {
+      lines.push(`    ${o.edge} edge  ${o.overlapX}×${o.overlapY}px  "${o.text}" @ (${o.textPos[0]},${o.textPos[1]})`);
     }
   }
 

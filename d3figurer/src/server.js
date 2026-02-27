@@ -332,8 +332,29 @@ class FigurerServer {
                 textPos: [Math.round(t.x), Math.round(t.y)] });
             }
           }
+          // rectIntrusions — text outside a rect whose bounding box still overlaps it.
+          // boxOverflows only catches text whose centre is inside the rect; this catches
+          // labels that poke into a rect from outside (e.g. arrow labels near node boxes).
+          const rectIntrusions = [];
+          for (const t of allNodes) {
+            const cx = t.x + t.w / 2, cy = t.y + t.h / 2;
+            const isInsideAny = boxes.some(b => cx >= b.x && cx <= b.r && cy >= b.y && cy <= b.b);
+            if (isInsideAny) continue; // already handled by boxOverflows
+            for (const box of boxes) {
+              const ox = Math.min(t.r, box.r) - Math.max(t.x, box.x);
+              const oy = Math.min(t.b, box.b) - Math.max(t.y, box.y);
+              if (ox > OVERFLOW_TOL && oy > OVERFLOW_TOL) {
+                const edge = t.r > box.x && t.x < box.x ? 'right'
+                           : t.x < box.r && t.r > box.r ? 'left'
+                           : t.b > box.y && t.y < box.y ? 'bottom' : 'top';
+                rectIntrusions.push({ text: t.text, edge,
+                  overlapX: Math.round(ox), overlapY: Math.round(oy),
+                  textPos: [Math.round(t.x), Math.round(t.y)] });
+              }
+            }
+          }
           return { textCount: allNodes.length, checkedCount: nodes.length,
-            overlaps, tooClose, clipped, boxOverflows };
+            overlaps, tooClose, clipped, boxOverflows, rectIntrusions };
         }, svgW, svgH);
         if (screenshotPath) {
           await this._page.setViewport({ width: svgW, height: svgH, deviceScaleFactor: 2 });

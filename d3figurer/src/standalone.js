@@ -7,7 +7,6 @@
 
 const path = require('path');
 const fs = require('fs');
-const puppeteer = require('puppeteer');
 
 class StandaloneRenderer {
   constructor(options = {}) {
@@ -97,6 +96,7 @@ class StandaloneRenderer {
 <body>${svgHtml}</body>
 </html>`;
 
+    const puppeteer = require('puppeteer');
     const browser = await puppeteer.launch(this.options.chromeOptions);
     const page = await browser.newPage();
     

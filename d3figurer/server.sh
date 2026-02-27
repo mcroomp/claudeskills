@@ -8,17 +8,17 @@
 #   • server.sh restart  : only render-server.js restarts — Chrome stays warm
 #   • server.sh stop     : stops both render-server.js and Chrome
 #
-# Working directory (--work-dir or D3FIGURER_WORK_DIR env var):
-#   <work-dir>/d3figurer/    node_modules for d3figurer
+# When installed via npm (npm install -g d3figurer), node_modules and Chrome
+# are already in place and no separate install step is needed.
+#
+# For development with source on a Windows/NTFS mount (WSL2), use the
+# working-directory approach to keep node_modules on the Linux FS:
+#   <work-dir>/d3figurer/    node_modules (Linux FS for performance)
 #   <work-dir>/puppeteer/    Chrome binary (PUPPETEER_CACHE_DIR)
 #   <work-dir>/run/          PID files and logs
 #
-# The caller decides where packages and runtime files live.
-# Default: ~/.d3figurer-work  (override with --work-dir or D3FIGURER_WORK_DIR)
-#
-# NODE_PATH is set to the d3figurer modules dir when launching the server so
-# require() resolves from the work dir regardless of where source files live.
-# Run 'install' once per work-dir to set everything up.
+# Default work-dir: ~/.d3figurer-work  (override with --work-dir or D3FIGURER_WORK_DIR)
+# Run 'install' once to set up the work-dir.
 #
 # Commands:
 #   ./server.sh install [--work-dir <path>]              one-time: install node_modules
@@ -53,7 +53,27 @@ chrome_ready() {
 }
 
 find_chrome() {
-  find "$PUPPETEER_DIR" -name "chrome" -type f 2>/dev/null | head -1
+  # 1. Search WORK_DIR (dev mode / server.sh install)
+  local c
+  c=$(find "$PUPPETEER_DIR" -name "chrome" -type f 2>/dev/null | head -1)
+  if [ -n "$c" ]; then echo "$c"; return; fi
+
+  # 2. Ask Puppeteer — works when installed via npm (Chrome in ~/.cache/puppeteer/)
+  local mods=""
+  if [ -d "$FIGURER_DIR/node_modules" ]; then
+    mods="$FIGURER_DIR/node_modules"
+  elif [ -d "$MODULES_DIR/node_modules" ]; then
+    mods="$MODULES_DIR/node_modules"
+  fi
+  if [ -n "$mods" ]; then
+    local path
+    path=$(NODE_PATH="$mods" node --no-warnings -e \
+      "try{const p=require('puppeteer');const e=p.executablePath();if(e)process.stdout.write(e)}catch(e){}" \
+      2>/dev/null || true)
+    if [ -n "$path" ] && [ -f "$path" ]; then echo "$path"; return; fi
+    # Fallback: search Puppeteer's default cache directory
+    find "$HOME/.cache/puppeteer" -name "chrome" -type f 2>/dev/null | head -1 || true
+  fi
 }
 
 # ── Commands ─────────────────────────────────────────────────────────────────
@@ -84,6 +104,11 @@ CHROME_LOG="$RUN_DIR/chrome.log"
 case "$cmd" in
 
   install)
+    if [ -d "$FIGURER_DIR/node_modules" ]; then
+      echo "Skipping install: d3figurer is installed as an npm package."
+      echo "(node_modules found at $FIGURER_DIR/node_modules)"
+      exit 0
+    fi
     echo "Installing d3figurer node_modules to $MODULES_DIR (Linux FS)"
     echo ""
     mkdir -p "$MODULES_DIR" "$PUPPETEER_DIR" "$RUN_DIR"
@@ -116,8 +141,15 @@ case "$cmd" in
       exit 0
     fi
 
-    if [ ! -d "$MODULES_DIR/node_modules" ]; then
-      echo "node_modules not found at $MODULES_DIR. Run './server.sh install' first."
+    # Determine node_modules location: npm install (next to source) or dev/WORK_DIR mode
+    if [ -d "$FIGURER_DIR/node_modules" ]; then
+      FIGURER_MODULES="$FIGURER_DIR/node_modules"
+      NEED_NODE_PATH=false
+    elif [ -d "$MODULES_DIR/node_modules" ]; then
+      FIGURER_MODULES="$MODULES_DIR/node_modules"
+      NEED_NODE_PATH=true
+    else
+      echo "node_modules not found. Run './server.sh install' first (or 'npm install -g d3figurer')."
       exit 1
     fi
 
@@ -154,18 +186,24 @@ case "$cmd" in
       echo "Chrome already running (PID $(cat "$CHROME_PID_FILE"))."
     fi
 
-    # ── Step 2: start render server with NODE_PATH → Linux FS modules ──
+    # ── Step 2: start render server ──────────────────────────────────────
     echo "Starting d3figurer render server..."
     RESOLVED_SRC_DIR=""
     if [ -n "$SRC_DIR" ]; then
       RESOLVED_SRC_DIR="$(realpath "$SRC_DIR")"
     fi
 
-    NODE_PATH="$MODULES_DIR/node_modules" \
-    CHROME_URL="http://127.0.0.1:$CHROME_PORT" \
-    PUPPETEER_CACHE_DIR="$PUPPETEER_DIR" \
-    D3FIGURER_SRC_DIR="$RESOLVED_SRC_DIR" \
-      node "$FIGURER_DIR/bin/d3figurer-server.js" "$PORT" > "$LOG_FILE" 2>&1 &
+    if $NEED_NODE_PATH; then
+      NODE_PATH="$FIGURER_MODULES" \
+      CHROME_URL="http://127.0.0.1:$CHROME_PORT" \
+      PUPPETEER_CACHE_DIR="$PUPPETEER_DIR" \
+      D3FIGURER_SRC_DIR="$RESOLVED_SRC_DIR" \
+        node "$FIGURER_DIR/bin/d3figurer-server.js" "$PORT" > "$LOG_FILE" 2>&1 &
+    else
+      CHROME_URL="http://127.0.0.1:$CHROME_PORT" \
+      D3FIGURER_SRC_DIR="$RESOLVED_SRC_DIR" \
+        node "$FIGURER_DIR/bin/d3figurer-server.js" "$PORT" > "$LOG_FILE" 2>&1 &
+    fi
     echo $! > "$PID_FILE"
     echo "PID $(cat "$PID_FILE") — waiting for ready..."
     for i in $(seq 1 30); do
@@ -221,7 +259,9 @@ case "$cmd" in
     else
       chrome_status="Chrome not running"
     fi
-    if [ -d "$MODULES_DIR/node_modules" ]; then
+    if [ -d "$FIGURER_DIR/node_modules" ]; then
+      modules_status="modules: $FIGURER_DIR (npm)"
+    elif [ -d "$MODULES_DIR/node_modules" ]; then
       modules_status="modules: $MODULES_DIR"
     else
       modules_status="modules: NOT INSTALLED (run './server.sh install')"

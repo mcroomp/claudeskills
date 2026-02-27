@@ -20,7 +20,12 @@ for arg in "$@"; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NODE_MODULES="$HOME/.d3figurer-work/d3figurer/node_modules"
+# Find node_modules: next to the package (npm install) or in WORK_DIR (dev/WSL)
+if [ -d "$SCRIPT_DIR/node_modules" ]; then
+  NODE_MODULES="$SCRIPT_DIR/node_modules"
+else
+  NODE_MODULES="${D3FIGURER_WORK_DIR:-$HOME/.d3figurer-work}/d3figurer/node_modules"
+fi
 
 cd "$SCRIPT_DIR"
 

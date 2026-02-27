@@ -25,8 +25,8 @@ jobs:
       - name: Make scripts executable
         run: chmod +x d3figurer/server.sh d3figurer/test.sh
 
-      - name: Install dependencies
-        run: d3figurer/server.sh install
+      - name: Install dependencies (skip Chrome — not needed for unit tests)
+        run: PUPPETEER_SKIP_DOWNLOAD=true npm install --prefix d3figurer
 
       - name: Run unit tests
         run: d3figurer/test.sh -v

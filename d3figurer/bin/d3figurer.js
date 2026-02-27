@@ -6,6 +6,7 @@
  */
 
 const D3Figurer = require('../src/index');
+const { formatReport } = require('../src/checker');
 const path = require('path');
 const fs = require('fs');
 
@@ -436,21 +437,21 @@ async function runCheck(figureName, options) {
     showUsage();
     process.exit(1);
   }
-  
+
   const figurer = new D3Figurer({
     srcDir: options.srcDir ? path.resolve(options.srcDir) : null
   });
-  
+
+  const t0 = Date.now();
   try {
     const result = await figurer.checkFigure(figureName);
-    console.log(`Figure: ${result.figure} (${result.svgW}x${result.svgH})`);
-    console.log(`Text elements: ${result.textCount}`);
-    console.log(`Overlaps: ${result.overlaps.length}`);
-    console.log(`Clipped: ${result.clipped.length}`);
-    
-    if (result.overlaps.length > 0 || result.clipped.length > 0) {
-      process.exit(1);
-    }
+    const elapsed = Date.now() - t0;
+    process.stdout.write(formatReport(result, figureName, { elapsedMs: elapsed }) + '\n');
+
+    const hasIssues = result.overlaps.length > 0 || result.clipped.length > 0
+      || (result.tooClose || []).length > 0 || (result.boxOverflows || []).length > 0
+      || (result.rectIntrusions || []).length > 0;
+    if (hasIssues) process.exit(1);
   } catch (error) {
     console.error(`Error checking ${figureName}:`, error.message);
     process.exit(1);

@@ -30,23 +30,29 @@ d3figurer closes the loop:
 
 ## Installation
 
+**npm (recommended — macOS, Linux, WSL):**
+```bash
+npm install -g d3figurer
+d3figurer-setup-mcp
+```
+
+**From repo clone — macOS, Linux, WSL:**
+```bash
+d3figurer/setup_mcp.sh
+```
+
 **Windows (CMD):**
 ```bat
 d3figurer\setup_mcp.cmd
 ```
 
-**WSL or Linux:**
-```bash
-d3figurer/setup_mcp.sh
-```
-
-`setup_mcp.sh` installs Node.js if needed, runs `server.sh install` to put npm packages and Chrome on the Linux filesystem, then registers `mcp.sh` with Claude Code via `claude mcp add --scope user`. Restart Claude Code after running it.
+`setup_mcp.sh` / `d3figurer-setup-mcp` installs Node.js if needed, installs npm packages and Chrome, then registers `mcp.sh` with Claude Code via `claude mcp add --scope user`. Restart Claude Code after running.
 
 ## Requirements
 
-- WSL2 (Windows) or Linux
-- Node.js ≥ 18 — installed automatically by `setup_mcp.sh` if missing
-- npm packages and Chrome binary — installed to `~/.d3figurer-work/` by `setup_mcp.sh`
+- macOS, Linux, or WSL2 (Windows)
+- Node.js ≥ 18 — installed automatically by the setup script if missing
+- Chrome — downloaded by Puppeteer during `npm install`
 
 ## Usage
 

@@ -261,6 +261,86 @@ Default ports: `9229` (render server), `9230` (Chrome DevTools).
 | Queue deadlock after rejection | `makeQueue()` in `server.js` | `tail = next.catch(() => {})` |
 | `_internals` export dropped on NTFS | `server.js` | Append via Python or `printf` — Claude Code's Edit tool drops trailing lines on NTFS |
 | Puppeteer loads at module parse | `server.js` | `require('puppeteer')` moved inside `start()` |
+| Puppeteer loads at module parse | `standalone.js` | `require('puppeteer')` moved inside `render()` |
+| `check` command shows `Figure: undefined` | `bin/d3figurer.js` | `runCheck` now uses `formatReport` from `checker.js` — full overlap details displayed |
+| `check` command ignores `tooClose`/`boxOverflows` | `bin/d3figurer.js` | Exit code 1 now triggers on all four issue categories |
+
+---
+
+## Using d3figurer from a project (not gallery)
+
+You can keep figures inside the project repository and point d3figurer at them with `--src-dir`.
+
+### Directory layout (flat — one level)
+
+```
+myproject/
+└── figures/
+    ├── shared/           ← skipped by discovery; put helpers + styles here
+    │   ├── styles.js     ← project-specific palette
+    │   └── helpers.js    ← copy of gallery/shared/helpers.js; require('./styles')
+    ├── architecture/
+    │   └── figure.js     ← figure name: "architecture"
+    └── timeline/
+        └── figure.js     ← figure name: "timeline"
+```
+
+Figures import shared utilities one level up:
+```js
+const S = require('../shared/styles.js');
+const { makeSVG, addMarker, addText } = require('../shared/helpers.js');
+```
+
+### Matching the project's font
+
+In `shared/styles.js`, override `FONT` and `fontStyle()` to match the LaTeX stylesheet:
+
+```js
+FONT: "'Fira Sans', Arial, sans-serif",
+fontStyle(svgNode) {
+  svgNode.append('defs').append('style').text(
+    "@import url('https://fonts.googleapis.com/css2?family=Fira+Sans:ital,wght@0,300;0,400;0,600;0,700;1,400&display=swap');"
+  );
+},
+```
+
+### Workflow
+
+```bash
+# 1. Start server (Chrome + render server) pointing at project figures
+./server.sh start --src-dir /path/to/myproject/figures
+
+# 2. Render figures to PDF (NODE_PATH required for d3/jsdom)
+NODE_PATH=$HOME/.d3figurer-work/d3figurer/node_modules \
+  node bin/d3figurer.js render architecture /path/to/myproject/archi.pdf --format pdf
+
+# 3. Check layout — now shows full overlap/clipping details
+NODE_PATH=$HOME/.d3figurer-work/d3figurer/node_modules \
+  node bin/d3figurer.js check architecture
+
+# 4. If PDF is locked (Windows viewer open), render to /tmp first
+NODE_PATH=$HOME/.d3figurer-work/d3figurer/node_modules \
+  node bin/d3figurer.js render timeline /tmp/timeline.pdf --format pdf
+cp /tmp/timeline.pdf /path/to/myproject/timeline.pdf
+```
+
+### Restart gotcha
+
+`server.sh restart` restarts only the Node process without `--src-dir`, losing the figures.
+Use **stop + start** when you need to change or reload `--src-dir`:
+
+```bash
+./server.sh stop && ./server.sh start --src-dir /path/to/figures
+```
+
+### LaTeX integration
+
+Include d3figurer PDFs in LaTeX with:
+```latex
+\includegraphics[width=0.95\textwidth]{figure.pdf}
+```
+
+When removing LaTeX packages that write to `.aux` (e.g. `pgfgantt`), delete `main.aux` before the first rebuild to avoid "Undefined control sequence" errors from stale entries.
 
 ---
 
@@ -269,8 +349,10 @@ Default ports: `9229` (render server), `9230` (Chrome DevTools).
 1. **Linux FS for packages** — never `npm install` into `/mnt/c/`.
 2. **One Chrome, many renders** — Chrome starts once; Node connects via DevTools protocol.
 3. **Queue correctness** — always `tail = next.catch(() => {})` in `makeQueue`.
-4. **Lazy Puppeteer** — `require('puppeteer')` stays inside `start()`; never at module load.
+4. **Lazy Puppeteer** — `require('puppeteer')` stays inside `start()` and `render()`; never at module load.
 5. **Pure formatReport** — no I/O, no side effects.
 6. **Figure contract** — every `figure.js` returns an SVG string with `width="N" height="N"`.
 7. **MCP graceful degradation** — return "Server not running" text rather than throwing.
 8. **Gallery output is generated** — `gallery/output/` is in `.gitignore`; built by CI.
+9. **NODE_PATH required for CLI** — always prefix CLI calls with `NODE_PATH=$HOME/.d3figurer-work/d3figurer/node_modules`.
+10. **src-dir on `/mnt/c/` is fine** — only node_modules needs Linux FS; figure sources can live anywhere.
