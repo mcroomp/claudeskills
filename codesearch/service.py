@@ -292,7 +292,7 @@ def cmd_index(args) -> None:
             [_VENV_PY, "-u", _INDEXER_PY] + flags,
             stdout=log,
             stderr=log,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+            start_new_session=True,
         )
     open(_INDEXER_PID, "w").write(str(p.pid))
     print(f"  Indexer running (PID {p.pid})")
